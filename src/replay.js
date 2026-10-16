@@ -1,13 +1,14 @@
 // Frame recording for instant replays, run replays and ghosts.
 import * as THREE from 'three';
 
-export const POSE_KEYS = ['crouch', 'edge', 'grab', 'grabAmt', 'tweak', 'press', 'armsOut', 'look', 'bail', 'wobble', 'balance', 'skid', 'tuck', 'spinArm'];
+export const POSE_KEYS = ['crouch', 'lean', 'edgeX', 'grab', 'grabAmt', 'tweak', 'press', 'armsOut', 'look', 'bail', 'wobble', 'balance', 'skid', 'tuck', 'spinArm', 'turn', 'drag'];
 const MODES = ['ground', 'air', 'grind', 'bail'];
 // pos(3) quat(4) vel(3) mode(1) pose(14)
 export const FRAME = 11 + POSE_KEYS.length;
 
 export function writeFrame(arr, o, r) {
-  arr[o] = r.pos.x; arr[o + 1] = r.pos.y; arr[o + 2] = r.pos.z;
+  const p = r.renderPos || r.pos;
+  arr[o] = p.x; arr[o + 1] = p.y; arr[o + 2] = p.z;
   const q = r.renderQuat;
   arr[o + 3] = q.x; arr[o + 4] = q.y; arr[o + 5] = q.z; arr[o + 6] = q.w;
   arr[o + 7] = r.vel.x; arr[o + 8] = r.vel.y; arr[o + 9] = r.vel.z;

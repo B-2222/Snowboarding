@@ -21,7 +21,7 @@ export const MODE_INFO = {
   halfpipe: {
     name: 'Superpipe', short: 'SUPERPIPE',
     blurb: 'Two runs in the 180 m superpipe. Pump the walls, link spins and flips. Best run counts.',
-    medals: { bronze: 5000, silver: 12000, gold: 25000 },
+    medals: { bronze: 15000, silver: 40000, gold: 90000 },
   },
 };
 

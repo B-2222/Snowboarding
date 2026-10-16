@@ -95,7 +95,7 @@ export class Audio {
     const windAmt = clamp(sp / 30, 0, 1) * (air ? 1.25 : 0.8) * (state.paused ? 0 : 1);
     this.wind.g.gain.setTargetAtTime(windAmt * 0.32, t, 0.12);
     this.wind.f.frequency.setTargetAtTime(300 + sp * 45 + (air ? 500 : 0), t, 0.2);
-    const carveAmt = ground && !state.paused ? clamp(sp / 18, 0, 1) * (0.25 + Math.abs(state.edge) * 0.7 + state.skid * 0.9) : 0;
+    const carveAmt = ground && !state.paused ? clamp(sp / 18, 0, 1) * (0.2 + state.edge * 0.9 + state.skid * 1.1) : 0;
     this.carve.g.gain.setTargetAtTime(carveAmt * 0.28, t, 0.05);
     this.carve.f.frequency.setTargetAtTime(state.powder > 0.5 ? 900 : 1800 + state.skid * 1400, t, 0.1);
     const grinding = state.mode === 'grind' && !state.paused;

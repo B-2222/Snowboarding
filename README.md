@@ -44,10 +44,13 @@ controls, and with a gamepad.
 
 | Action | Keyboard | Gamepad |
 | --- | --- | --- |
-| Carve / spin / balance on rails | A, D | Left stick |
-| Tuck (and push on flats) / frontflip | W | Left stick up |
-| Brake / backflip | S | Left stick down |
+| Roll onto your toe or heel edge and carve | A, D (hold longer for a deeper edge) | Left stick |
+| Tuck (and push on flats) | W | LT |
+| Hockey stop | S | B |
 | Ollie (hold to load, release to pop) | Space | A |
+| Wind up a spin | Hold A or D while loading Space | Left stick while holding A |
+| Load a flip (needs a kicker, the pipe or a cliff) | Hold W or S while loading Space | Left stick while holding A |
+| Keep rotating / stop rotating in the air | Keep holding / let go | Hold / let go |
 | Grabs | Arrow keys or I, J, K, L | Right stick |
 | Tweak the grab | Shift | RB / RT |
 | Reset to safe spot | R | Y |
@@ -56,9 +59,18 @@ controls, and with a gamepad.
 | Teleport (Free Ride) | M | |
 | Pause | Esc or P | Menu |
 
-Tips: pop right at the lip of a kicker for extra height, and hold A or D
-while loading an ollie to pre-wind your spin. Land with the board lined up,
-nose or tail first.
+How it rides:
+
+- **Carving:** holding A or D rolls the board up onto an edge. The more it is
+  tilted, the tighter it carves, and the rider leans into the turn, sinking
+  under the load and rising between turns. Push too hard at speed and the edge
+  washes out into a skid. On a deep carve the rider drags a hand in the snow.
+- **Jumps are real jumps:** a flat-ground ollie is a knee-high hop. Spins and
+  flips start at takeoff (wind them up while loading the ollie, or the instant
+  you leave the lip). You can't start one halfway through the air, and flips
+  need real air time. Pressing A or D late gives a shifty instead.
+- **Landing:** let go a moment before you touch down so the board lines up,
+  nose or tail first.
 
 ## Development
 

@@ -137,6 +137,12 @@ export class AirTrick {
     let grabPts = 0;
     for (const q of grabs) grabPts += (GRABS[q.id].base + 260 * Math.min(q.time, 1.6)) * (q.tweaked ? 1.5 : 1);
     const airPts = this.airTime > 0.45 ? 45 * this.airTime : 0;
+    let shiftyPts = 0;
+    if (!a.name && (this.shifty || 0) > 0.5) {
+      const fs = (this.shiftyDir > 0) !== this.goofy !== this.switchTakeoff;
+      a.name = `${this.switchTakeoff ? 'Switch ' : ''}${fs ? 'Frontside' : 'Backside'} Shifty`;
+      shiftyPts = 180;
+    }
     let name = [a.name, g].filter(Boolean).join(' ');
     if (!name) {
       if (this.airTime < 0.75) return null;
@@ -145,7 +151,7 @@ export class AirTrick {
     if (this.inPipe && !a.special && a.halfTurns === 0 && a.flips === 0) name = 'Pipe ' + name;
     const switchMult = this.switchTakeoff && (a.halfTurns || a.flips) ? 1.15 : 1;
     const landMult = landing === 'perfect' ? 1.25 : landing === 'sketchy' ? 0.5 : 1;
-    const points = (rot * grabMult + grabPts + airPts + 50) * switchMult * landMult;
+    const points = (rot * grabMult + grabPts + airPts + shiftyPts + 50) * switchMult * landMult;
     return {
       kind: 'air',
       name,

@@ -154,7 +154,7 @@ export class Online {
         const presence = {
           v: 1,
           n: (rd.name || '').slice(0, 18),
-          s: [round(r.pos.x), round(r.pos.y), round(r.pos.z), round(q.x, 1000), round(q.y, 1000), round(q.z, 1000), round(q.w, 1000)],
+          s: [round((r.renderPos || r.pos).x), round((r.renderPos || r.pos).y), round((r.renderPos || r.pos).z), round(q.x, 1000), round(q.y, 1000), round(q.z, 1000), round(q.w, 1000)],
           k: POSE_KEYS.map((k) => round(r.pose[k] || 0)),
           t: r.mode === 'air' && g.rider.trickLabel ? g.rider.trickLabel.slice(0, 60) : '',
           m: g.mode ? g.mode.id : 'menu',

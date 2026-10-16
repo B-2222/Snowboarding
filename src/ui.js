@@ -555,10 +555,13 @@ export class UI {
       <h2 class="title">How to shred</h2>
       <div class="controls-grid">
         <div><h4>Keyboard</h4><dl class="kv">
-          <dt><kbd>A</kbd> <kbd>D</kbd></dt><dd>Carve on snow · spin in the air · balance on rails</dd>
-          <dt><kbd>W</kbd></dt><dd>Tuck for speed (and push on flats) · frontflip in the air</dd>
-          <dt><kbd>S</kbd></dt><dd>Brake · backflip in the air</dd>
+          <dt><kbd>A</kbd> <kbd>D</kbd></dt><dd>Roll onto your heel or toe edge and carve. Hold longer for a deeper edge · balance on rails</dd>
+          <dt><kbd>W</kbd></dt><dd>Tuck for speed (and push on flats)</dd>
+          <dt><kbd>S</kbd></dt><dd>Hockey stop: skid the board sideways</dd>
           <dt><kbd>Space</kbd></dt><dd>Hold to load, release to ollie. Pop at the lip to go bigger</dd>
+          <dt><kbd>Space</kbd> + <kbd>A</kbd>/<kbd>D</kbd></dt><dd>Wind up a spin while loading; it starts as you take off</dd>
+          <dt><kbd>Space</kbd> + <kbd>W</kbd>/<kbd>S</kbd></dt><dd>Load a frontflip or backflip (only with enough air: kickers, pipe, cliffs)</dd>
+          <dt>In the air</dt><dd>Keep holding to keep rotating, let go to open up and stop</dd>
           <dt>Arrows or <kbd>I</kbd><kbd>J</kbd><kbd>K</kbd><kbd>L</kbd></dt><dd>Grabs in the air · nose/tail press on snow and rails</dd>
           <dt><kbd>Shift</kbd></dt><dd>Tweak the grab you are holding</dd>
           <dt><kbd>R</kbd></dt><dd>Reset to your last safe spot</dd>

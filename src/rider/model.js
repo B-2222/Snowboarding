@@ -540,6 +540,11 @@ export class RiderModel {
     }
   }
 
+  handWorld(front, out) {
+    out.copy(front ? this.j.haF : this.j.haB);
+    return this.inner.localToWorld(out);
+  }
+
   // pose: see Rider.pose. dt drives secondary motion only.
   update(pose, dt = 0.016) {
     this.time += dt;
@@ -561,6 +566,8 @@ export class RiderModel {
       tz = tw[2] * DEG * amt;
     }
     tz += -pose.press * 0.26;
+    // the board rolls further onto its edge than the body leans
+    tx += pose.edgeX || 0;
     _e.set(tx, ty, tz);
     this.board.quaternion.setFromEuler(_e);
     if (Math.abs(pose.press) > 0.01) {
@@ -575,12 +582,17 @@ export class RiderModel {
     j.ankB.set(-FOOT_X, ANKLE_Y, -0.025).applyQuaternion(bq).add(bp);
 
     // ---- pelvis
-    const crouch = clamp(pose.crouch, 0, 1);
-    let hipH = lerp(0.8, 0.5, crouch);
+    const crouch = clamp(pose.crouch, -0.15, 1.1);
+    const lean = pose.lean || 0; // + = toward the toes (toeside), - = heelside
+    const heel = Math.max(0, -lean);
+    const toe = Math.max(0, lean);
+    let hipH = lerp(0.8, 0.5, clamp(crouch, 0, 1)) + Math.min(0, crouch) * -0.25;
+    hipH -= heel * 0.12; // heelside: sit down into the turn
     if (grab) hipH = lerp(hipH, lerp(0.6, 0.4, grab.tuck), ga);
     hipH += Math.sin(t * 30) * pose.wobble * 0.03;
     const px = pose.press * 0.16 + Math.sin(t * 22) * pose.wobble * 0.04;
-    const pz = -0.07 + crouch * 0.04 - pose.edge * 0.1 + pose.balance * 0.08;
+    // toeside drives the hips over the toes, heelside sits them back
+    const pz = -0.07 + clamp(crouch, 0, 1) * 0.04 + toe * 0.12 - heel * 0.1 + pose.balance * 0.08;
     j.pelvis.set(px, hipH, pz);
     j.hipF.set(px + 0.095, hipH - 0.05, pz);
     j.hipB.set(px - 0.095, hipH - 0.05, pz);
@@ -592,12 +604,13 @@ export class RiderModel {
     ik(j.hipB, j.ankB, THIGH, SHIN, poleB, j.kneeB, j.ankB);
 
     // ---- spine: bend over the toes, lean with the carve, flail in a bail
-    const bend = 0.2 + crouch * 0.32 + ga * (grab && grab.point[2] < 0 ? 0.3 : 0.6) + pose.tuck * 0.35;
-    const side = pose.edge * 0.22 + pose.balance * 0.4 + Math.sin(t * 9) * bail * 0.4;
+    // angulation: on the toes the chest stays tall, on the heels it folds forward
+    const bend = 0.2 + clamp(crouch, 0, 1) * 0.32 + ga * (grab && grab.point[2] < 0 ? 0.3 : 0.6) + pose.tuck * 0.35 - toe * 0.35 + heel * 0.55;
+    const side = (pose.turn || 0) * 0.12 + pose.balance * 0.4 + Math.sin(t * 9) * bail * 0.4;
     const spine = new THREE.Vector3(Math.sin(side) * 0.3 + px * 0.2, Math.cos(bend), Math.sin(bend)).normalize();
     j.chest.copy(j.pelvis).addScaledVector(spine, SPINE);
     // shoulders open toward the direction of travel and wind up in spins
-    const twist = pose.look * 0.4 + pose.spinArm * 0.75 + Math.sin(t * 11) * bail * 0.8;
+    const twist = pose.look * 0.4 + pose.spinArm * 0.75 + (pose.turn || 0) * 0.25 + Math.sin(t * 11) * bail * 0.8;
     const sAxis = new THREE.Vector3(1, 0, 0).applyAxisAngle(spine, twist);
     sAxis.addScaledVector(spine, -sAxis.dot(spine)).normalize();
     const facing = new THREE.Vector3().crossVectors(sAxis, spine).normalize();
@@ -618,6 +631,23 @@ export class RiderModel {
     if (Math.abs(pose.spinArm) > 0.01) {
       hf.addScaledVector(facing, pose.spinArm * 0.22);
       hb.addScaledVector(facing, -pose.spinArm * 0.22);
+    }
+    // carving arms: reach toward the toes on toeside turns, forward for
+    // balance on heelside, and on a deep carve the inside hand drags the snow
+    if (Math.abs(lean) > 0.02 && !grab) {
+      hf.z += toe * 0.25 + heel * 0.3;
+      hb.z += toe * 0.15 + heel * 0.25;
+      hf.y -= toe * 0.15;
+      const drag = pose.drag || 0;
+      if (drag > 0.01) {
+        const phi = Math.abs(lean);
+        const roll = phi + Math.abs(pose.edgeX || 0);
+        const lift = 0.145 * Math.sin(Math.min(1.3, roll));
+        const z = Math.sign(lean) * 0.5;
+        const y = (Math.abs(z) * Math.sin(phi) - lift + 0.04) / Math.max(0.3, Math.cos(phi));
+        if (lean > 0) hf.lerp(_a.set(0.32, y, z), drag);
+        else hb.lerp(_a.set(-0.22, y, z), drag);
+      }
     }
     if (grab && ga > 0.01) {
       const gp = _b.set(...grab.point).applyQuaternion(bq).add(bp);
@@ -673,7 +703,7 @@ export class RiderModel {
     // head looks toward travel (nose when riding regular, tail when switch)
     this.head.position.copy(j.head);
     const look = clamp(pose.look, -1, 1);
-    const hz = new THREE.Vector3().copy(facing).multiplyScalar(1 - Math.abs(look) * 0.55).addScaledVector(sAxis, look * 0.95);
+    const hz = new THREE.Vector3().copy(facing).multiplyScalar(1 - Math.abs(look) * 0.55 + (pose.turn || 0) * 0.35).addScaledVector(sAxis, look * 0.95);
     hz.addScaledVector(spine, -hz.dot(spine)).normalize();
     const hx = new THREE.Vector3().crossVectors(spine, hz).normalize();
     _m.makeBasis(hx, spine, hz);

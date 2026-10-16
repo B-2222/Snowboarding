@@ -15,14 +15,21 @@ export const PHYS = {
   drag: 0.0082,
   dragTuck: 0.0052,
   dragPowder: 0.008,
-  popBase: 3.3,
-  popCharge: 2.7,
+  popBase: 2.3,
+  popCharge: 1.3,
   chargeTime: 0.45,
   maxSpin: 10.5,
   spinAccel: 44,
   maxFlip: 6.4,
   flipAccel: 28,
   coyote: 0.14,
+  // carving
+  sidecut: 4.6, // curvature = sin(edge) / sidecut
+  maxLatAccel: 19, // grip limit before the edge washes out (about 1.7 g)
+  edgeBuild: 2.8, // rad/s rolling onto an edge
+  edgeRelease: 6.5, // rad/s flattening or switching edges
+  spinWindow: 0.22, // seconds after takeoff a spin or flip can still start
+  flipAirTime: 0.95, // minimum predicted air time for a flip
 };
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -68,9 +75,18 @@ export class Rider {
     this.coyote = 0;
     this.popped = false;
     this.pose = {
-      crouch: 0, edge: 0, grab: 0, grabAmt: 0, tweak: 0, press: 0, armsOut: 0,
-      look: 1, bail: 0, wobble: 0, balance: 0, skid: 0, tuck: 0, spinArm: 0,
+      crouch: 0, lean: 0, edgeX: 0, grab: 0, grabAmt: 0, tweak: 0, press: 0, armsOut: 0,
+      look: 1, bail: 0, wobble: 0, balance: 0, skid: 0, tuck: 0, spinArm: 0, turn: 0, drag: 0,
     };
+    this.renderPos = new THREE.Vector3();
+    this.edge = 0; // board edge angle, + when turning right
+    this.kCarve = 0; // current carve curvature (1/m), + right
+    this.latLoad = 0; // lateral g from the carve
+    this.normLoad = 1; // g pressing into the snow
+    this.bank = 0; // inclination into the turn (rad), + right
+    this.preflip = 0;
+    this.comp = 0.2;
+    this.compV = 0;
     this.air = null;
     this.grind = null;
     this.butter = null;
@@ -108,6 +124,10 @@ export class Rider {
     this.air = this.grind = this.butter = null;
     this.charge = 0;
     this.prewind = 0;
+    this.preflip = 0;
+    this.edge = 0;
+    this.kCarve = 0;
+    this.bank = 0;
     this.bailT = 0;
     this.pose.bail = 0;
     this.pose.grabAmt = 0;
@@ -118,6 +138,7 @@ export class Rider {
     this.lastSafe.fwd.copy(this.fwd);
     quatFromBasis(this.fwd, this.up, this.quat);
     this.renderQuat.copy(this.quat);
+    this.renderPos.copy(this.pos);
   }
 
   // ------------------------------------------------------------------ step
@@ -163,25 +184,21 @@ export class Rider {
       this.endButter();
     }
 
-    // ---- steering
-    const tuck = input.lean > 0.5 && !this.charge;
-    const brake = input.lean < -0.5 && !this.butter;
-    const speedT = clamp(sp / 24, 0, 1);
-    let yaw = 0;
-    if (this.butter) {
-      yaw = -input.steer * 5.2 * dt;
-      this.butter.update(dt, yaw);
+    // ---- inputs
+    const charging = input.jump && !this.butter;
+    const tuck = input.lean > 0.5 && !charging && !this.butter;
+    const brake = input.lean < -0.5 && !charging && !this.butter;
+    const speedT = clamp(sp / 20, 0, 1);
+    // Loading an ollie: A/D wind the upper body up for a spin and W/S
+    // pre-load a flip, instead of steering the board.
+    if (charging) {
+      this.prewind = approach(this.prewind, -input.steer, 3.0 * dt);
+      this.preflip = approach(this.preflip, input.lean, 3.0 * dt);
     } else {
-      const rate = lerp(PHYS.turnLow, PHYS.turnHigh, speedT) * (brake ? 1.25 : 1) * (1 - g.powder * 0.2);
-      yaw = -input.steer * rate * dt;
+      this.prewind = approach(this.prewind, 0, 5 * dt);
+      this.preflip = approach(this.preflip, 0, 5 * dt);
     }
-    rotateAround(this.fwd, n, yaw);
-
-    // ---- gravity along the slope
-    _v2.set(0, -PHYS.G, 0);
-    _v2.addScaledVector(n, -_v2.dot(n));
-    vt.addScaledVector(_v2, dt);
-    sp = vt.length();
+    const steerIn = this.butter ? 0 : input.steer * (charging ? 0.3 : 1);
 
     // ---- riding direction (switch detection with hysteresis)
     if (sp > 0.8) {
@@ -189,26 +206,78 @@ export class Rider {
       if (this.switchRiding && along > 0.25) this.switchRiding = false;
       else if (!this.switchRiding && along < -0.25) this.switchRiding = true;
     }
-    const dirBoard = _v3.copy(this.fwd).multiplyScalar(this.switchRiding ? -1 : 1);
 
-    // ---- carve: velocity follows the board
+    // ---- edge angle: the board rolls up onto its toe or heel edge
+    const maxEdge = lerp(0.5, 1.12, speedT); // about 29 to 64 degrees
+    let targetEdge = steerIn * maxEdge;
+    let brakeSign = 0;
+    if (brake) {
+      // hockey stop on the edge you're already on (heel edge by default)
+      brakeSign = Math.abs(this.edge) > 0.12 ? Math.sign(this.edge) : this.switchRiding ? 1 : -1;
+      targetEdge = brakeSign * 0.75;
+    }
+    const building = targetEdge !== 0 && Math.sign(targetEdge) === Math.sign(this.edge || targetEdge) && Math.abs(targetEdge) > Math.abs(this.edge);
+    this.edge = approach(this.edge, targetEdge, (building ? PHYS.edgeBuild : PHYS.edgeRelease) * dt);
+
+    // ---- carve: an edged board slices an arc, tighter the more it's tilted.
+    // Ask for more than the edge can hold at speed and it washes out.
+    let yawRate = 0;
+    let washout = 0;
+    let dirBoard = _v3.copy(this.fwd).multiplyScalar(this.switchRiding ? -1 : 1);
+    if (this.butter) {
+      yawRate = -input.steer * 5.2;
+      this.butter.update(dt, yawRate * dt);
+      this.kCarve = 0;
+    } else if (brake && sp > 0.5) {
+      // swing the board across the fall line and skid it to a stop
+      const ang = Math.atan2(_v2.crossVectors(vt, dirBoard).dot(n), vt.dot(dirBoard));
+      const want = -brakeSign * 1.35;
+      yawRate = clamp((want - ang) * 9, -7, 7);
+      this.kCarve = 0;
+    } else {
+      const kappa = Math.sin(this.edge) / PHYS.sidecut;
+      const kMax = PHYS.maxLatAccel / Math.max(sp * sp, 1);
+      this.kCarve = clamp(kappa, -kMax, kMax);
+      washout = Math.abs(kappa) > 1e-4 ? Math.max(0, Math.abs(kappa) - kMax) / Math.abs(kappa) : 0;
+      yawRate = -this.kCarve * sp - Math.sign(kappa) * washout * 1.6;
+      // at walking pace you pivot the board with your feet
+      if (sp < 3) yawRate += -steerIn * (1 - sp / 3) * 2.2;
+    }
+    rotateAround(this.fwd, n, yawRate * dt);
+    dirBoard = _v3.copy(this.fwd).multiplyScalar(this.switchRiding ? -1 : 1);
+
+    // ---- gravity along the slope
+    _v2.set(0, -PHYS.G, 0);
+    _v2.addScaledVector(n, -_v2.dot(n));
+    vt.addScaledVector(_v2, dt);
+    sp = vt.length();
+
+    // ---- grip: an edged board holds its line, a flat base drifts
+    const pipe = w.pipeInfo(this.pos.x, this.pos.z);
+    this.inPipe = !!(pipe && pipe.inside);
+    const onPipeWall = this.inPipe && pipe.onWall;
     let skid = 0;
     if (sp > 0.05) {
-      const cross = _v2.crossVectors(vt, dirBoard).dot(n);
-      const dot = vt.dot(dirBoard);
-      const ang = Math.atan2(cross, dot);
+      const ang = Math.atan2(_v2.crossVectors(vt, dirBoard).dot(n), vt.dot(dirBoard));
       skid = Math.abs(Math.sin(ang));
-      const grip = (this.butter ? 1.5 : PHYS.grip) * (1 - g.powder * 0.35) * (brake ? 0.15 : 1);
-      const maxRot = grip * dt;
-      const rot = clamp(ang, -maxRot, maxRot);
+      let grip = lerp(3.2, 18, smoothstep(0.05, 0.4, Math.abs(this.edge)));
+      grip *= (1 - g.powder * 0.35) * (1 - washout * 0.7);
+      if (onPipeWall) grip = Math.max(grip, 14); // you ride a transition on your edge
+      if (brake) grip = 0.5;
+      if (this.butter) grip = 1.5;
+      const rot = clamp(ang, -grip * dt, grip * dt);
       rotateAround(vt, n, rot);
-      sp *= 1 - Math.abs(rot) * 0.035;
-      vt.setLength(sp);
-    } else if (!brake && sp < 0.05) {
+      vt.setLength(sp * (1 - Math.abs(rot) * 0.02));
+      sp = vt.length();
+    } else if (!brake) {
       // standing still on a slope: start sliding down the fall line
       vt.copy(dirBoard).multiplyScalar(0.06);
       sp = 0.06;
     }
+    this.latLoad = (sp * sp * Math.abs(this.kCarve)) / PHYS.G;
+    this.bank = Math.atan(this.latLoad / Math.max(0.3, n.y)) * Math.sign(this.kCarve);
+    if (brake) this.bank = brakeSign * clamp(sp / 14, 0, 1) * 0.55;
+    this.washout = washout;
 
     // ---- skating: tuck on a flat at low speed pushes you along
     if (tuck && sp < 6 && !this.butter) {
@@ -227,20 +296,36 @@ export class Rider {
       vt.multiplyScalar(Math.max(0, sp + acc * dt) / sp);
       sp = vt.length();
     }
-    const pipe = w.pipeInfo(this.pos.x, this.pos.z);
-    this.inPipe = !!(pipe && pipe.inside);
-    if (this.inPipe && sp > 0.5) {
-      if (pipe.onWall && vt.y < 0) {
-        vt.multiplyScalar((sp + 2.2 * dt) / sp);
-      }
-      // keep the run down the pipe at a steady pace
-      const along = -vt.z;
-      if (along > 9) vt.z += (along - 9) * 1.5 * dt;
+    if (this.inPipe && sp > 0.5 && pipe.full > 0.6) {
+      // pump: drop into each wall and gain speed
+      if (pipe.onWall && vt.y < 0) vt.multiplyScalar((sp + 3.0 * dt) / sp);
       sp = vt.length();
+      // flow: most of your speed goes wall to wall, not down the pipe
+      const along = -vt.z;
+      const cap = 6.5;
+      if (Math.abs(along) > cap) {
+        const na = Math.sign(along) * (cap + (Math.abs(along) - cap) * Math.exp(-3 * dt));
+        const cx = vt.x, cy = vt.y;
+        const crossLen = Math.hypot(cx, cy);
+        const want = Math.sqrt(Math.max(0, sp * sp - na * na));
+        vt.z = -na;
+        if (crossLen > 0.3) {
+          vt.x = (cx / crossLen) * want;
+          vt.y = (cy / crossLen) * want;
+        } else {
+          vt.x = (pipe.v > 0 ? -1 : 1) * want;
+        }
+        vt.addScaledVector(n, -vt.dot(n));
+        vt.setLength(sp);
+      }
+      // the board follows your line through the transition
+      const db = _v3.copy(this.fwd).multiplyScalar(this.switchRiding ? -1 : 1);
+      const ang = Math.atan2(_v2.crossVectors(db, vt).dot(n), db.dot(vt));
+      rotateAround(this.fwd, n, clamp(ang, -9 * dt, 9 * dt));
     }
 
-    // ---- friction and drag
-    const mu = PHYS.mu + g.powder * PHYS.muPowder + (brake ? PHYS.muBrake : 0) + skid * 0.35;
+    // ---- friction and drag (skidding scrubs speed, a clean carve keeps it)
+    const mu = PHYS.mu + g.powder * PHYS.muPowder + skid * 0.55 + (brake ? 0.08 : 0);
     const fr = mu * PHYS.G * Math.max(0.2, n.y) * dt;
     const k = (tuck ? PHYS.dragTuck : PHYS.drag) + g.powder * PHYS.dragPowder;
     let nsp = sp - fr - k * sp * sp * dt;
@@ -248,14 +333,10 @@ export class Rider {
     nsp = Math.min(nsp, PHYS.maxSpeed);
     if (sp > 1e-5) vt.multiplyScalar(nsp / sp);
     this.vel.copy(vt);
-    this.skidSmooth = damp(this.skidSmooth, brake ? 1 : skid > 0.4 ? skid : 0, 8, dt);
-    this.edgeSmooth = damp(this.edgeSmooth, -input.steer * speedT * (brake ? 0.4 : 1), 7, dt);
+    this.skidSmooth = damp(this.skidSmooth, skid > 0.2 ? skid : 0, 8, dt);
 
     // ---- ollie charge / pop
-    if (input.jump) {
-      this.charge = Math.min(1, this.charge + dt / PHYS.chargeTime);
-      this.prewind = damp(this.prewind, -input.steer, 6, dt);
-    }
+    if (input.jump) this.charge = Math.min(1, this.charge + dt / PHYS.chargeTime);
     const released = this.jumpWasDown && !input.jump;
 
     // ---- integrate
@@ -278,7 +359,10 @@ export class Rider {
     // Leave the ground when the surface drops away faster than gravity
     // (and the rider's legs) can follow: lips, copings, fast knuckles.
     const away = this.vel.dot(n2);
-    if ((gap > stick || away > 2.5 * PHYS.G * n2.y * dt) && away > -0.2) {
+    // how hard the snow pushes back (compressions in transitions, landings)
+    this.normLoad = damp(this.normLoad, n2.y + clamp(-away / dt / PHYS.G, -0.8, 3), 12, dt);
+    const slidingDownWall = this.inPipe && this.vel.y < 0.3 && n2.y < 0.7;
+    if ((gap > stick || away > 2.5 * PHYS.G * n2.y * dt) && away > -0.2 && !slidingDownWall) {
       this.takeoff(false);
       return;
     }
@@ -313,9 +397,16 @@ export class Rider {
     // On a kicker the lip already throws you; a well-timed pop adds a
     // controlled boost so the landing stays reachable.
     const kicker = this.world.kickerAt(this.pos.x, this.pos.z);
-    const power = kicker ? 0.7 + 1.1 * this.charge : PHYS.popBase + PHYS.popCharge * this.charge;
-    this.vel.addScaledVector(n, power);
-    this.vel.y += power * 0.15;
+    const pipe = this.world.pipeInfo(this.pos.x, this.pos.z);
+    if (pipe && pipe.onWall && n.y < 0.6) {
+      // at the coping an ollie adds height, not a push toward the deck
+      this.vel.y += 0.8 + 1.4 * this.charge;
+    } else {
+      // a flat-ground ollie is a real ollie: knee-high at best
+      const power = kicker ? 0.7 + 1.1 * this.charge : PHYS.popBase + PHYS.popCharge * this.charge;
+      this.vel.addScaledVector(n, power);
+    }
+    this.compV -= 5;
     this.emit('pop', { charge: this.charge });
     this.charge = 0;
     this.takeoff(true);
@@ -339,8 +430,11 @@ export class Rider {
       t: 0,
       spin: 0,
       flip: 0,
-      spinRate: Math.abs(this.prewind) > 0.3 ? this.prewind * PHYS.maxSpin * 0.75 : 0,
+      spinRate: 0,
       flipRate: 0,
+      shifty: 0,
+      poke: 0,
+      canFlip: false,
       q0: new THREE.Quaternion(),
       qMid: new THREE.Quaternion(),
       qL: new THREE.Quaternion(),
@@ -364,6 +458,11 @@ export class Rider {
     a.qMid.copy(_q2).multiply(a.q0);
     a.f0 = new THREE.Vector3(1, 0, 0).applyQuaternion(a.q0);
     this.predictLanding();
+    // Rotation comes from the takeoff: the wind-up becomes the spin, and a
+    // flip needs enough air to come round.
+    a.canFlip = a.T >= PHYS.flipAirTime && !fromRail;
+    if (Math.abs(this.prewind) > 0.15) a.spinRate = this.prewind * PHYS.maxSpin;
+    if (a.canFlip && Math.abs(this.preflip) > 0.2) a.flipRate = -this.preflip * PHYS.maxFlip * 0.85;
     // Flip axis: horizontal, perpendicular to travel.
     const vh = _v1.set(this.vel.x, 0, this.vel.z);
     if (vh.lengthSq() < 4) {
@@ -375,6 +474,7 @@ export class Rider {
     vh.normalize();
     a.flipAxis.crossVectors(vh, UP).normalize();
     this.prewind = 0;
+    this.preflip = 0;
     this.trick = new AirTrick({
       switchTakeoff: this.switchRiding,
       goofy: this.goofy,
@@ -428,6 +528,7 @@ export class Rider {
     if (!this.popped && this.coyote > 0 && this.jumpWasDown && !input.jump && this.charge > 0.05) {
       const power = this.air.kicker ? 0.6 + 0.9 * this.charge : (PHYS.popBase + PHYS.popCharge * this.charge) * 0.85;
       this.vel.y += power;
+      this.compV -= 4;
       this.popped = true;
       this.charge = 0;
       this.emit('pop', { charge: 1, late: true });
@@ -442,13 +543,35 @@ export class Rider {
     this.pos.addScaledVector(this.vel, dt);
     this.maxY = Math.max(this.maxY, this.pos.y);
 
-    // ---- rotation input
+    // ---- rotation: you can only start a spin or flip as you leave the snow.
+    // After that, holding keeps it going, letting go opens up to stop it.
     const steer = Math.abs(input.steer) > 0.2 ? input.steer : 0;
     const lean = Math.abs(input.lean) > 0.35 ? input.lean : 0;
-    const targetSpin = -steer * PHYS.maxSpin;
-    a.spinRate = approach(a.spinRate, targetSpin, (steer ? PHYS.spinAccel : PHYS.spinAccel * 0.55) * dt);
-    const targetFlip = -lean * PHYS.maxFlip * (input.invertFlip ? -1 : 1);
-    a.flipRate = approach(a.flipRate, targetFlip, (lean ? PHYS.flipAccel : PHYS.flipAccel * 0.7) * dt);
+    const early = a.t < PHYS.spinWindow;
+    if (steer) {
+      const dir = -Math.sign(steer);
+      const going = Math.abs(a.spinRate) > 1.2 && Math.sign(a.spinRate) === dir;
+      if (early || going) a.spinRate = approach(a.spinRate, dir * PHYS.maxSpin * Math.abs(steer), PHYS.spinAccel * dt);
+      else if (Math.abs(a.spinRate) > 0.01) a.spinRate = approach(a.spinRate, 0, PHYS.spinAccel * 1.2 * dt);
+      else {
+        a.shifty = approach(a.shifty, dir * 0.85, 4.5 * dt); // a shifty: body twist, no rotation
+        if (!a.toldLate && a.t > 0.3) { a.toldLate = true; this.emit('lateSpin'); }
+      }
+    } else {
+      a.spinRate = approach(a.spinRate, 0, 24 * dt);
+      a.shifty = approach(a.shifty, 0, 5 * dt);
+    }
+    const flipDir = -Math.sign(lean) * (input.invertFlip ? -1 : 1);
+    if (lean && a.canFlip) {
+      const going = Math.abs(a.flipRate) > 1 && Math.sign(a.flipRate) === flipDir;
+      if (early || going) a.flipRate = approach(a.flipRate, flipDir * PHYS.maxFlip, PHYS.flipAccel * dt);
+      else if (Math.abs(a.flipRate) > 0.01) a.flipRate = approach(a.flipRate, 0, PHYS.flipAccel * 1.2 * dt);
+    } else {
+      a.flipRate = approach(a.flipRate, 0, 18 * dt);
+    }
+    if (lean && !a.canFlip && !a.toldFlip) { a.toldFlip = true; this.emit('noFlip'); }
+    // not enough air to flip: you can still poke the nose or tail
+    a.poke = approach(a.poke, lean && !a.canFlip ? -lean * 0.4 : 0, 3.5 * dt);
     a.spin += a.spinRate * dt;
     a.flip += a.flipRate * dt;
     // landing assist: settle to the nearest landable angle
@@ -471,6 +594,8 @@ export class Rider {
       a.grab = '';
     }
     this.trick.update(dt, a.spin, a.flip, a.grab, input.tweak);
+    this.trick.shifty = Math.max(this.trick.shifty || 0, Math.abs(a.shifty));
+    if (Math.abs(a.shifty) > 0.5) this.trick.shiftyDir = Math.sign(a.shifty);
     this.trickLabel = this.trick.liveLabel();
 
     a.predictTimer -= dt;
@@ -484,8 +609,12 @@ export class Rider {
     const base = this.quat;
     if (s < 0.5) base.copy(a.q0).slerp(a.qMid, smoothstep(0, 0.42, s));
     else base.copy(a.qMid).slerp(a.qL, smoothstep(0.58, 0.97, s));
-    _q1.setFromAxisAngle(UP, a.spin);
+    _q1.setFromAxisAngle(UP, a.spin + a.shifty);
     base.multiply(_q1);
+    if (a.poke) {
+      _q1.setFromAxisAngle(_v1.set(0, 0, 1), a.poke);
+      base.multiply(_q1);
+    }
     _q2.setFromAxisAngle(a.flipAxis, a.flip);
     base.premultiply(_q2);
     this.fwd.set(1, 0, 0).applyQuaternion(base);
@@ -543,6 +672,8 @@ export class Rider {
     this.vel.copy(vt).multiplyScalar(keep * (1 - flatLoss));
     this.switchRiding = this.vel.dot(this.fwd) < 0;
     this.landWobble = quality === 'sketchy' ? 1 : 0;
+    this.compV += clamp(vIn * 0.45, 0.5, 7);
+    this.edge = 0;
     const result = this.trick ? this.trick.finalize(quality) : null;
     this.trick = null;
     this.trickLabel = '';
@@ -777,37 +908,60 @@ export class Rider {
   updatePose(dt, input) {
     const p = this.pose;
     const mode = this.mode;
+    const ground = mode === 'ground';
     const airGrab = mode === 'air' && this.air ? GRAB_IDS.indexOf(this.air.grab) : 0;
     if (airGrab > 0) p.grab = airGrab;
     p.grabAmt = damp(p.grabAmt, airGrab > 0 ? 1 : 0, 16, dt);
     if (p.grabAmt < 0.02 && airGrab === 0) p.grab = 0;
     p.tweak = damp(p.tweak, airGrab > 0 && input.tweak ? 1 : 0, 9, dt);
-    let crouch = 0.25;
-    if (mode === 'ground') {
-      crouch = 0.22 + this.charge * 0.7 + (input.lean > 0.5 ? 0.35 : 0) + Math.abs(this.edgeSmooth) * 0.25;
-    } else if (mode === 'air') crouch = 0.35 + p.grabAmt * 0.6;
-    else if (mode === 'grind') crouch = 0.35 + this.charge * 0.5;
-    p.crouch = damp(p.crouch, clamp(crouch, 0, 1), 10, dt);
-    p.tuck = damp(p.tuck, mode === 'ground' && input.lean > 0.5 ? 1 : 0, 6, dt);
-    p.edge = damp(p.edge, mode === 'ground' ? this.edgeSmooth : 0, 10, dt);
-    if (mode !== 'grind') p.press = damp(p.press, mode === 'ground' && this.butter ? this.butter.dir : 0, 10, dt);
-    p.armsOut = damp(p.armsOut, mode === 'air' ? 1 - p.grabAmt : mode === 'grind' ? 0.8 : 0.15, 6, dt);
-    p.spinArm = damp(p.spinArm, mode === 'air' && this.air ? clamp(this.air.spinRate / PHYS.maxSpin, -1, 1) : 0, 8, dt);
+
+    // Legs are a spring: they soak up g-load from carves, transitions and
+    // landings, sink while loading an ollie and snap straight on the pop.
+    let target = 0.22;
+    if (ground) {
+      const load = Math.sqrt(this.normLoad * this.normLoad + this.latLoad * this.latLoad);
+      target = 0.2 + clamp((load - 1) * 0.3, -0.12, 0.45) + this.charge * 0.6 + (input.lean > 0.5 && !this.charge ? 0.3 : 0);
+    } else if (mode === 'air') target = 0.3 + p.grabAmt * 0.55;
+    else if (mode === 'grind') target = 0.35 + this.charge * 0.5;
+    this.compV += ((target - this.comp) * 95 - this.compV * 13) * dt;
+    this.comp += this.compV * dt;
+    this.comp = clamp(this.comp, -0.15, 1.15);
+    p.crouch = this.comp;
+
+    p.tuck = damp(p.tuck, ground && input.lean > 0.5 && !this.charge ? 1 : 0, 6, dt);
+    // Lean: the body inclines into the turn, the board rolls further onto
+    // its edge underneath (angulation). Signs are board-local: + toward toes.
+    // pose values are measured toward the toes (the model mirrors for goofy)
+    const stance = this.goofy ? -1 : 1;
+    const toward = (this.switchRiding ? -1 : 1) * stance;
+    const incl = ground ? clamp(Math.abs(this.bank), 0, 1.05) : 0;
+    const edgeAbs = ground ? Math.abs(this.edge) : 0;
+    const side = Math.sign(this.edge || this.bank) * toward;
+    p.lean = damp(p.lean, incl * side, 9, dt);
+    p.edgeX = damp(p.edgeX, Math.max(0, edgeAbs - incl * 0.85) * side, 10, dt);
+    p.turn = damp(p.turn, ground ? clamp(this.kCarve * 10, -1, 1) * toward : 0, 6, dt);
+    p.drag = damp(p.drag, ground ? smoothstep(0.72, 0.95, incl) : 0, 6, dt);
+    if (mode !== 'grind') p.press = damp(p.press, ground && this.butter ? this.butter.dir : 0, 10, dt);
+    p.armsOut = damp(p.armsOut, mode === 'air' ? 1 - p.grabAmt : mode === 'grind' ? 0.8 : 0.12 + Math.abs(p.lean) * 0.4, 6, dt);
+    let spinArm = 0;
+    if (mode === 'air' && this.air) spinArm = clamp(this.air.spinRate / PHYS.maxSpin, -1, 1) + this.air.shifty * 0.6;
+    else if (ground && this.charge > 0) spinArm = -this.prewind * 0.9; // wind-up: shoulders coil the other way
+    p.spinArm = damp(p.spinArm, spinArm, 8, dt);
     p.look = damp(p.look, this.switchRiding ? -1 : 1, 6, dt);
     p.bail = damp(p.bail, mode === 'bail' ? 1 : 0, 8, dt);
     this.landWobble = Math.max(0, this.landWobble - dt * 1.6);
     p.wobble = this.landWobble;
     p.balance = damp(p.balance, mode === 'grind' && this.grind ? this.grind.balance : 0, 12, dt);
-    p.skid = damp(p.skid, mode === 'ground' ? this.skidSmooth : 0, 8, dt);
+    p.skid = damp(p.skid, ground ? this.skidSmooth : 0, 8, dt);
 
-    // render orientation = physics orientation + visual edge roll / skid yaw
+    // render orientation: body inclined into the turn, board lifted onto its edge
     this.renderQuat.copy(this.quat);
-    if (mode === 'ground') {
-      const dirSign = this.switchRiding ? -1 : 1;
-      _q1.setFromAxisAngle(_v1.set(1, 0, 0), p.edge * 0.42 * dirSign + Math.sin(performance.now() * 0.02) * p.wobble * 0.15);
+    this.renderPos.copy(this.pos);
+    if (ground) {
+      _q1.setFromAxisAngle(_v1.set(1, 0, 0), p.lean * stance + Math.sin(performance.now() * 0.02) * p.wobble * 0.12);
       this.renderQuat.multiply(_q1);
-      _q2.setFromAxisAngle(_v1.set(0, 1, 0), p.skid * 0.9 * (this.edgeSmooth >= 0 ? 1 : -1) * dirSign);
-      this.renderQuat.multiply(_q2);
+      const roll = Math.abs(p.lean) + Math.abs(p.edgeX);
+      this.renderPos.addScaledVector(this.up, 0.145 * Math.sin(Math.min(roll, 1.3)));
     } else if (mode === 'grind') {
       _q1.setFromAxisAngle(_v1.set(1, 0, 0), p.balance * 0.35);
       this.renderQuat.multiply(_q1);

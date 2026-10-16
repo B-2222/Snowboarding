@@ -24,6 +24,7 @@ export class CameraRig {
     this.shotIndex = 0;
     this.orbitA = 0;
     this.snapNext = true;
+    this.roll = 0;
   }
 
   cycle() {
@@ -108,6 +109,8 @@ export class CameraRig {
       this.look.lerp(lookT, 1 - Math.exp(-10 * dt));
     }
     this.fov = damp(this.fov, clamp(60 + speed * 0.55, 60, 82) + (this.mode === 'action' ? 6 : 0), 3, dt);
+    // bank gently into carves
+    this.roll = damp(this.roll, r.mode === 'ground' ? -(r.bank || 0) * 0.11 : 0, 4, dt);
     this.apply(dt);
   }
 
@@ -118,6 +121,7 @@ export class CameraRig {
     const oy = this.noise(0, this.t * 18) * s;
     this.camera.position.set(this.pos.x + ox, this.pos.y + oy, this.pos.z);
     this.camera.lookAt(this.look);
+    if (this.roll) this.camera.rotateZ(this.roll);
     if (Math.abs(this.camera.fov - this.fov) > 0.05) {
       this.camera.fov = this.fov;
       this.camera.updateProjectionMatrix();
@@ -127,6 +131,7 @@ export class CameraRig {
   // Cinematic replay: alternates tracking shots, orbits and chase.
   replay(dt, r, slowmo) {
     this.t += dt;
+    this.roll = 0;
     this.shotT -= dt;
     const pos = r.pos;
     if (!this.shot || this.shotT <= 0 || pos.distanceTo(this.shot.anchor || pos) > 32) {
@@ -176,6 +181,7 @@ export class CameraRig {
   // Slow fly-over used behind the menus.
   attract(dt, world) {
     this.t += dt;
+    this.roll = 0;
     const k = world.kickers.find((q) => q.id === 'k-xl1');
     const a = this.t * 0.05;
     const cx = k.x0;
@@ -192,6 +198,7 @@ export class CameraRig {
   // Close-up turntable on the rider for the customise screen.
   showcase(dt, pos, yaw) {
     this.t += dt;
+    this.roll = 0;
     const a = yaw;
     const dist = 4.6;
     this.pos.set(pos.x + Math.sin(a) * dist, pos.y + 1.25, pos.z + Math.cos(a) * dist);

@@ -192,12 +192,17 @@ class Game {
     r.on('takeoff', (e) => {
       this.tracks.reset();
       const dev = this.input.lastDevice;
-      const html = dev === 'touch' ? 'In the air: left stick spins and flips, right stick grabs'
-        : dev === 'gamepad' ? 'In the air: left stick spins and flips · right stick grabs · RB tweaks'
-        : 'In the air: <kbd>A</kbd><kbd>D</kbd> spin · <kbd>W</kbd><kbd>S</kbd> flip · arrows grab · <kbd>Shift</kbd> tweak';
+      const html = dev === 'touch' ? 'Spins and flips start as you take off. Keep holding to rotate, let go to stop'
+        : dev === 'gamepad' ? 'Spins and flips start at takeoff: hold the stick to keep rotating, let go to stop · right stick grabs'
+        : 'Spins and flips start at takeoff: hold <kbd>A</kbd><kbd>D</kbd> or <kbd>W</kbd><kbd>S</kbd> to keep rotating, let go to stop · arrows grab';
       if (e.popped || this.rider.air) this.ui.hint('air', html, 6);
     });
     r.on('land', (e) => this.onLand(e));
+    r.on('noFlip', () => this.ui.hint('noflip', 'Not enough air to flip here. Flips need a kicker, the pipe or a cliff', 4));
+    r.on('lateSpin', () => {
+      const dev = this.input.lastDevice;
+      this.ui.hint('latespin', dev === 'keyboard' ? 'Spins start at takeoff: hold <kbd>A</kbd> or <kbd>D</kbd> while loading <kbd>Space</kbd>, then release at the lip' : 'Spins start at takeoff: steer while loading the jump, then release at the lip', 5);
+    });
     r.on('bail', (e) => this.onBail(e));
     r.on('grindStart', (e) => {
       this.audio.grindStart(e.rail.kind);
@@ -350,7 +355,7 @@ class Game {
     const dev = this.input.lastDevice;
     const start = dev === 'touch' ? 'Left stick carves. Hold JUMP to load an ollie, let go to pop'
       : dev === 'gamepad' ? 'Left stick carves · hold A to load an ollie, release to pop'
-      : 'Hold <kbd>Space</kbd> to load an ollie, release to pop · <kbd>A</kbd><kbd>D</kbd> carve · <kbd>W</kbd> tuck';
+      : 'Hold <kbd>A</kbd> or <kbd>D</kbd> to roll onto an edge and carve · <kbd>W</kbd> tuck · <kbd>S</kbd> hockey stop · <kbd>Space</kbd> ollie';
     this.ui.hint('start', start, 6);
     this.canvasFocus();
   }
@@ -586,7 +591,7 @@ class Game {
     this.audio.update({
       speed: this.state === 'play' || this.state === 'replay' ? view.speed || 0 : 0,
       mode: view.mode,
-      edge: view.pose ? view.pose.edge : 0,
+      edge: this.state === 'replay' ? Math.abs(view.pose.lean || 0) : Math.abs(this.rider.edge),
       skid: view.pose ? view.pose.skid : 0,
       powder: this.rider.ground.powder,
       railKind: this.rider.grind ? this.rider.grind.rail.kind : null,
@@ -612,7 +617,7 @@ class Game {
     const banked = this.combo.update(dt, frozen);
     if (banked) this.onBank(banked);
 
-    this.model.group.position.copy(r.pos);
+    this.model.group.position.copy(r.renderPos);
     this.model.group.quaternion.copy(r.renderQuat);
     this.model.update(r.pose, dt);
     this.recorder.record(r, dt);
@@ -652,7 +657,7 @@ class Game {
     const k = this.world.kickers.find((q) => -r.pos.z > q.d0 - 30 && -r.pos.z < q.d0 && Math.abs(r.pos.x - q.x0) < q.width);
     if (k && r.mode === 'ground') {
       const dev = this.input.lastDevice;
-      this.ui.hint('kicker', dev === 'keyboard' ? 'Load <kbd>Space</kbd> on the ramp and release at the lip. Hold <kbd>A</kbd> or <kbd>D</kbd> while loading to pre-wind a spin' : 'Hold jump on the ramp, release at the lip. Steer while loading to pre-wind a spin', 6);
+      this.ui.hint('kicker', dev === 'keyboard' ? 'Hold <kbd>Space</kbd> up the ramp. Add <kbd>A</kbd>/<kbd>D</kbd> to wind up a spin or <kbd>W</kbd>/<kbd>S</kbd> for a flip, release at the lip' : 'Hold jump up the ramp, steer to wind up a spin, release at the lip', 7);
     }
   }
 
@@ -662,19 +667,39 @@ class Game {
     const pos = new THREE.Vector3();
     if (r.mode === 'ground') {
       const sp = r.speed;
-      const side = new THREE.Vector3(0, 0, 1).applyQuaternion(r.quat);
-      const amt = sp * (r.pose.skid * 1.4 + Math.abs(r.pose.edge) * 0.45 + r.ground.powder * 0.9) * dt * 2.2;
+      if (sp < 0.5) return;
+      const travel = r.vel.clone().normalize();
+      const right = new THREE.Vector3().crossVectors(travel, r.up).normalize();
+      const turn = Math.sign(r.edge || 0);
+      const inside = right.clone().multiplyScalar(turn || 1);
+      const edgeAbs = Math.abs(r.edge);
+      const carving = edgeAbs > 0.28 && r.pose.skid < 0.25;
+      const powder = r.ground.powder;
+      // carve rooster tail off the inside edge, skid spray, powder plumes
+      const carveAmt = carving ? edgeAbs * (0.4 + r.latLoad * 0.5) : 0;
+      const amt = sp * (carveAmt * 0.9 + r.pose.skid * 1.8 + powder * 1.1 + (r.washout || 0) * 2) * dt * 5;
       let n = Math.floor(amt + Math.random());
-      const tail = r.switchRiding ? 0.6 : -0.6;
-      const fwd = new THREE.Vector3(1, 0, 0).applyQuaternion(r.quat);
       while (n-- > 0) {
-        pos.copy(r.pos).addScaledVector(fwd, tail * Math.random()).addScaledVector(side, (Math.random() - 0.5) * 0.3);
-        pos.y += 0.05;
-        const s = Math.sign(r.pose.edge || 1);
-        v.copy(r.vel).multiplyScalar(0.25).addScaledVector(side, s * (1 + Math.random() * 2)).add(new THREE.Vector3(0, 1.2 + Math.random() * 2 + r.ground.powder * 2, 0));
-        p.emit(pos, v, { size: 0.18 + Math.random() * 0.25 + r.ground.powder * 0.25, life: 0.5 + Math.random() * 0.5 + r.ground.powder * 0.4, grav: 5, drag: 2.2, alpha: 0.85 });
+        pos.copy(r.pos).addScaledVector(travel, -0.55 * Math.random()).addScaledVector(inside, 0.12);
+        pos.y += 0.04;
+        if (r.pose.skid > 0.5) {
+          // hockey stop: a wall of snow thrown forward
+          v.copy(r.vel).multiplyScalar(0.55 + Math.random() * 0.3).add(new THREE.Vector3((Math.random() - 0.5) * 2, 1.5 + Math.random() * 2.5, (Math.random() - 0.5) * 2));
+        } else {
+          v.copy(r.vel).multiplyScalar(0.2).addScaledVector(inside, -(1.5 + Math.random() * 3) * (0.5 + edgeAbs)).add(new THREE.Vector3(0, 1.2 + Math.random() * 2.4 + powder * 2.5, 0));
+        }
+        p.emit(pos, v, { size: 0.07 + Math.random() * 0.12 + powder * 0.18, life: 0.35 + Math.random() * 0.45 + powder * 0.5, grav: 6, drag: 2.4, alpha: 0.7 + Math.random() * 0.25 });
       }
-      this.tracks.add(r.pos, side, 0.13, 1);
+      // hand dragging through the snow on a deep carve
+      if (r.pose.drag > 0.35 && Math.random() < r.pose.drag * 0.9) {
+        this.model.handWorld(r.pose.lean > 0, pos);
+        v.copy(r.vel).multiplyScalar(0.15).add(new THREE.Vector3((Math.random() - 0.5), 1 + Math.random() * 1.5, (Math.random() - 0.5)));
+        p.emit(pos, v, { size: 0.08 + Math.random() * 0.08, life: 0.45, grav: 5, drag: 2, alpha: 0.8 });
+      }
+      // a clean carve leaves a thin trench on the inside edge, a skid a smear
+      const side = new THREE.Vector3(0, 0, 1).applyQuaternion(r.quat);
+      if (carving) this.tracks.add(pos.copy(r.pos).addScaledVector(inside, 0.12), side, 0.035, 1);
+      else this.tracks.add(r.pos, side, 0.13 + r.pose.skid * 0.12, 1);
     } else if (r.mode === 'grind' && r.grind) {
       if (Math.random() < 0.6) {
         const metal = r.grind.rail.kind === 'rail';
@@ -739,7 +764,7 @@ class Game {
       this.showcaseYaw = (this.showcaseYaw || 0.6) + dt * 0.35;
       const r = this.rider;
       this.model.group.visible = true;
-      this.model.group.position.copy(r.pos);
+      this.model.group.position.copy(r.renderPos);
       this.model.group.quaternion.copy(r.renderQuat);
       r.pose.armsOut = 0.1;
       this.model.update(r.pose, dt);
@@ -754,7 +779,7 @@ class Game {
     // paused or results: keep the camera where it is, gently breathing
     this.cam.apply(dt);
     const r = this.rider;
-    this.model.group.position.copy(r.pos);
+    this.model.group.position.copy(r.renderPos);
     this.model.group.quaternion.copy(r.renderQuat);
   }
 
