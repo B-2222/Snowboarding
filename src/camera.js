@@ -44,41 +44,48 @@ export class CameraRig {
   // Follow a rider-like object {pos, vel, mode, air}
   follow(dt, r, opts = {}) {
     this.t += dt;
-    const pos = r.pos;
+    const pos = opts.pos || r.pos;
     const vel = r.vel;
     const vh = Math.hypot(vel.x, vel.z);
     const pipe = this.world.pipeInfo(pos.x, pos.z);
     const inPipe = pipe && pipe.u > 4 && pipe.u < this.world.pipe.length - 4 && Math.abs(pipe.v) < this.world.pipe.copingV + 3;
     const airborne = r.mode === 'air';
-    // heading
+    // the fall line: which way is straight down the hill here
+    const n = this.world.normalAt(pos.x, pos.z, this._n || (this._n = new THREE.Vector3()));
+    const fall = this._fall || (this._fall = new THREE.Vector3());
+    fall.set(n.x, 0, n.z);
+    if (fall.lengthSq() < 0.004) fall.set(0, 0, -1);
+    fall.normalize();
+    // Heading: follow your travel, but lean on the fall line so carving
+    // edge to edge doesn't swing the camera from side to side.
     if (inPipe) {
       this.dir.lerp(new THREE.Vector3(0, 0, -1), 1 - Math.exp(-3 * dt)).normalize();
     } else if (vh > 2.5 && r.mode !== 'bail') {
       const target = new THREE.Vector3(vel.x / vh, 0, vel.z / vh);
-      // never look back up the mountain for long
+      if (!airborne && r.mode !== 'grind') target.multiplyScalar(0.6).addScaledVector(fall, 0.4);
       if (target.z > 0.2) target.z = 0.2;
       target.normalize();
-      const rate = airborne ? 1.4 : r.mode === 'grind' ? 4 : 3.2;
+      const rate = airborne ? 1.2 : r.mode === 'grind' ? 4 : 2.6;
       this.dir.lerp(target, 1 - Math.exp(-rate * dt)).normalize();
     }
     const speed = r.speed || vel.length();
     let dist, height, side = 0;
     if (this.mode === 'far') {
-      dist = 11 + speed * 0.12;
-      height = 4.8 + speed * 0.04;
+      dist = 10.5 + speed * 0.1;
+      height = 4.4 + speed * 0.04;
     } else if (this.mode === 'action') {
-      dist = 3.4 + speed * 0.05;
-      height = 0.9;
+      dist = 3.3 + speed * 0.04;
+      height = 0.85;
       side = 1.4;
     } else {
-      dist = 5.8 + speed * 0.085;
-      height = 2.2 + speed * 0.03;
+      dist = 5.3 + speed * 0.07;
+      height = 1.95 + speed * 0.022;
     }
     // pull back on big airs so the landing stays in frame
     const air = airborne && r.air ? clamp(r.air.t * 1.2, 0, 3) : 0;
     this.airPull = damp(this.airPull, air, 3, dt);
-    dist += this.airPull * 0.55;
-    height += this.airPull * 0.35;
+    dist += this.airPull * 0.6;
+    height += this.airPull * 0.4;
 
     const target = new THREE.Vector3(pos.x, pos.y + 1.0, pos.z);
     const desired = new THREE.Vector3();
@@ -93,32 +100,36 @@ export class CameraRig {
     }
     const minY = this.world.height(desired.x, desired.z) + 0.7;
     if (desired.y < minY) desired.y = minY;
-    const lookT = target.clone().addScaledVector(vel, airborne ? 0.08 : 0.14);
+    // look a little ahead and down the hill, more the faster you go
+    const lookT = target.clone().addScaledVector(vel, airborne ? 0.09 : 0.16);
+    if (!airborne && !inPipe) lookT.addScaledVector(fall, clamp(speed * 0.06, 0, 1.6));
     if (this.snapNext) {
       this.pos.copy(desired);
       this.look.copy(lookT);
       this.snapNext = false;
     } else {
       // feed velocity forward so the damped camera does not trail behind
-      const pr = 7;
-      const ry = airborne ? 4 : 6;
+      const pr = 7.5;
+      const ry = airborne ? 4 : 6.5;
       this.pos.x = damp(this.pos.x, desired.x + vel.x / pr, pr, dt);
       this.pos.z = damp(this.pos.z, desired.z + vel.z / pr, pr, dt);
-      this.pos.y = damp(this.pos.y, desired.y + (airborne ? vel.y / ry * 0.5 : 0), ry, dt);
+      this.pos.y = damp(this.pos.y, desired.y + (airborne ? (vel.y / ry) * 0.5 : vel.y / ry), ry, dt);
       if (this.pos.y < minY) this.pos.y = minY;
-      this.look.lerp(lookT, 1 - Math.exp(-10 * dt));
+      this.look.lerp(lookT, 1 - Math.exp(-11 * dt));
     }
-    this.fov = damp(this.fov, clamp(60 + speed * 0.55, 60, 82) + (this.mode === 'action' ? 6 : 0), 3, dt);
-    // bank gently into carves
+    this.fov = damp(this.fov, clamp(58 + speed * 0.78, 58, 90) + (this.mode === 'action' ? 6 : 0), 2.5, dt);
+    // bank gently into carves; a faint rumble at high speed
     this.roll = damp(this.roll, r.mode === 'ground' ? -(r.bank || 0) * 0.11 : 0, 4, dt);
+    this.rumble = r.mode === 'ground' ? clamp((speed - 18) * 0.012, 0, 0.16) : 0;
     this.apply(dt);
   }
 
   apply(dt) {
     this.shakeAmt = Math.max(0, this.shakeAmt - dt * 2.2);
     const s = this.shakeAmt * this.shakeAmt * 0.35;
-    const ox = this.noise(this.t * 18, 0) * s;
-    const oy = this.noise(0, this.t * 18) * s;
+    const rb = this.rumble || 0;
+    const ox = this.noise(this.t * 18, 0) * s + this.noise(this.t * 31, 7) * rb * 0.12;
+    const oy = this.noise(0, this.t * 18) * s + this.noise(3, this.t * 33) * rb * 0.12;
     this.camera.position.set(this.pos.x + ox, this.pos.y + oy, this.pos.z);
     this.camera.lookAt(this.look);
     if (this.roll) this.camera.rotateZ(this.roll);
@@ -132,6 +143,7 @@ export class CameraRig {
   replay(dt, r, slowmo) {
     this.t += dt;
     this.roll = 0;
+    this.rumble = 0;
     this.shotT -= dt;
     const pos = r.pos;
     if (!this.shot || this.shotT <= 0 || pos.distanceTo(this.shot.anchor || pos) > 32) {
@@ -182,6 +194,7 @@ export class CameraRig {
   attract(dt, world) {
     this.t += dt;
     this.roll = 0;
+    this.rumble = 0;
     const k = world.kickers.find((q) => q.id === 'k-xl1');
     const a = this.t * 0.05;
     const cx = k.x0;
@@ -199,6 +212,7 @@ export class CameraRig {
   showcase(dt, pos, yaw) {
     this.t += dt;
     this.roll = 0;
+    this.rumble = 0;
     const a = yaw;
     const dist = 4.6;
     this.pos.set(pos.x + Math.sin(a) * dist, pos.y + 1.25, pos.z + Math.cos(a) * dist);

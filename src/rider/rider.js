@@ -5,15 +5,15 @@ import { AirTrick, GrindTrick, ButterTrick, grabFromInput, GRAB_IDS } from '../t
 
 export const PHYS = {
   G: 11.5,
-  maxSpeed: 37,
+  maxSpeed: 42,
   turnLow: 2.6,
   turnHigh: 1.45,
   grip: 6.5,
   mu: 0.032,
   muPowder: 0.055,
   muBrake: 0.6,
-  drag: 0.0082,
-  dragTuck: 0.0052,
+  drag: 0.0068,
+  dragTuck: 0.0042,
   dragPowder: 0.008,
   popBase: 2.3,
   popCharge: 1.3,
@@ -25,9 +25,9 @@ export const PHYS = {
   coyote: 0.14,
   // carving
   sidecut: 4.6, // curvature = sin(edge) / sidecut
-  maxLatAccel: 19, // grip limit before the edge washes out (about 1.7 g)
-  edgeBuild: 2.8, // rad/s rolling onto an edge
-  edgeRelease: 6.5, // rad/s flattening or switching edges
+  maxLatAccel: 15, // grip limit before the edge washes out (about 1.3 g)
+  edgeBuild: 4.0, // rad/s rolling onto an edge
+  edgeRelease: 7.5, // rad/s flattening or switching edges
   spinWindow: 0.22, // seconds after takeoff a spin or flip can still start
   flipAirTime: 0.95, // minimum predicted air time for a flip
 };
@@ -198,7 +198,9 @@ export class Rider {
       this.prewind = approach(this.prewind, 0, 5 * dt);
       this.preflip = approach(this.preflip, 0, 5 * dt);
     }
-    const steerIn = this.butter ? 0 : input.steer * (charging ? 0.3 : 1);
+    // on a kicker ramp the wind-up only coils the body; the board runs straight
+    const onRamp = charging && w.kickerAt(this.pos.x, this.pos.z);
+    const steerIn = this.butter ? 0 : input.steer * (onRamp ? 0 : charging ? 0.3 : 1);
 
     // ---- riding direction (switch detection with hysteresis)
     if (sp > 0.8) {
@@ -287,16 +289,11 @@ export class Rider {
       sp = vt.length();
     }
 
-    // ---- speed checks before features, pumping in the pipe
-    const zone = w.speedZoneAt(this.pos.x, this.pos.z);
-    if (zone && sp > 0.5 && !this.butter) {
-      let acc = clamp((zone.ideal - sp) * 1.3, -6, 2.5);
-      if (tuck && acc < 0 && sp < zone.ideal + 1.5) acc = 0;
-      if (brake) acc = Math.min(acc, 0);
-      vt.multiplyScalar(Math.max(0, sp + acc * dt) / sp);
-      sp = vt.length();
-    }
+    // ---- the superpipe: pump the walls and keep the flow wall to wall
     if (this.inPipe && sp > 0.5 && pipe.full > 0.6) {
+      // the pipe's ice scrubs off excess speed you bring in from above
+      if (sp > 13.5) vt.multiplyScalar(Math.max(13.5, sp - 5 * dt) / sp);
+      sp = vt.length();
       // pump: drop into each wall and gain speed
       if (pipe.onWall && vt.y < 0) vt.multiplyScalar((sp + 3.0 * dt) / sp);
       sp = vt.length();
@@ -325,10 +322,11 @@ export class Rider {
     }
 
     // ---- friction and drag (skidding scrubs speed, a clean carve keeps it)
-    const mu = PHYS.mu + g.powder * PHYS.muPowder + skid * 0.55 + (brake ? 0.08 : 0);
+    const mu = PHYS.mu + g.powder * PHYS.muPowder + skid * 0.55 + (brake ? 0.08 + skid * 0.45 : 0);
     const fr = mu * PHYS.G * Math.max(0.2, n.y) * dt;
     const k = (tuck ? PHYS.dragTuck : PHYS.drag) + g.powder * PHYS.dragPowder;
     let nsp = sp - fr - k * sp * sp * dt;
+    if (brake && nsp < 1.5) nsp *= Math.exp(-6 * dt); // edge set: you stay put
     if (nsp < 0) nsp = 0;
     nsp = Math.min(nsp, PHYS.maxSpeed);
     if (sp > 1e-5) vt.multiplyScalar(nsp / sp);

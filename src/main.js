@@ -37,6 +37,10 @@ class Game {
     this.replayPlayer = null;
     this.ghostPlayer = null;
     this.slowmo = false;
+    this.prevPos = new THREE.Vector3();
+    this.prevQuat = new THREE.Quaternion();
+    this.drawPos = new THREE.Vector3();
+    this.drawQuat = new THREE.Quaternion();
   }
 
   async init() {
@@ -319,6 +323,10 @@ class Game {
 
   spawnPoint(pos, dir, speed) {
     this.rider.spawn(pos, dir.clone(), speed);
+    this.prevPos.copy(this.rider.renderPos);
+    this.prevQuat.copy(this.rider.renderQuat);
+    this.drawPos.copy(this.rider.renderPos);
+    this.drawQuat.copy(this.rider.renderQuat);
     this.cam.snap();
     this.tracks.reset();
     this.combo.reset();
@@ -570,6 +578,7 @@ class Game {
       if (act.pause && this.ui.screen && this.ui.screen !== 'title') this.ui.show(this.ui.backTo || 'title');
     }
 
+    if (this.state !== 'play') this.ui.clearSpeedLines();
     if (this.state === 'play' && this.debugFreeze) this.cam.apply(0);
     else if (this.state === 'play') this.updatePlay(dt, inp);
     else if (this.state === 'replay') this.updateReplay(dt);
@@ -608,21 +617,28 @@ class Game {
     let first = true;
     while (this.acc >= FIXED) {
       const stepInput = first ? inp : { ...inp, jumpPressed: false };
+      this.prevPos.copy(r.renderPos);
+      this.prevQuat.copy(r.renderQuat);
       r.step(FIXED, stepInput);
       this.acc -= FIXED;
       first = false;
     }
+    // Draw between the last two physics states so motion is smooth at any
+    // frame rate (physics runs at a fixed 120 Hz).
+    const alpha = clamp(this.acc / FIXED, 0, 1);
+    this.drawPos.copy(this.prevPos).lerp(r.renderPos, alpha);
+    this.drawQuat.copy(this.prevQuat).slerp(r.renderQuat, alpha);
     if (this.mode) this.mode.update(dt);
     const frozen = r.mode === 'air' || r.mode === 'grind' || !!r.butter;
     const banked = this.combo.update(dt, frozen);
     if (banked) this.onBank(banked);
 
-    this.model.group.position.copy(r.renderPos);
-    this.model.group.quaternion.copy(r.renderQuat);
+    this.model.group.position.copy(this.drawPos);
+    this.model.group.quaternion.copy(this.drawQuat);
     this.model.update(r.pose, dt);
     this.recorder.record(r, dt);
     if (this.mode && this.mode.comp) this.runRecorder.record(r, dt);
-    this.cam.follow(dt, r);
+    this.cam.follow(dt, r, { pos: this.drawPos });
     this.emitFx(dt, r);
     this.checkCollectibles(r);
     // ghost
@@ -647,7 +663,7 @@ class Game {
     const comp = this.mode && this.mode.comp;
     ui.setScore(comp ? this.mode.scoreLabel : 'Session', comp ? this.mode.liveScore() : this.sessionScore);
     if (this.mode) ui.setModeInfo(this.mode.hud());
-    ui.setSpeed(r.speed, this.save.settings.units);
+    ui.setSpeed(r.speed, this.save.settings.units, r.mode);
     ui.setOnline(this.online.peerCount, this.online.status);
     const extras = [];
     if (this.ghostModel.group.visible) extras.push({ x: this.ghostModel.group.position.x, z: this.ghostModel.group.position.z, color: '#7fe3ff' });

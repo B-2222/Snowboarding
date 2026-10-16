@@ -45,9 +45,8 @@ function run(r, seconds, inputFn) {
 for (const id of ['k-s1', 'k-m1', 'k-l1', 'k-xl1', 'k-big']) {
   const k = world.kickers.find((q) => q.id === id);
   const r = makeRider();
-  const speeds = { 'k-s1': 10, 'k-m1': 13, 'k-l1': 15.5, 'k-xl1': 18, 'k-big': 21.5 };
   const start = new THREE.Vector3(k.x0, 0, -(k.d0 - 8));
-  r.spawn(start, new THREE.Vector3(0, 0, -1), speeds[id]);
+  r.spawn(start, new THREE.Vector3(0, 0, -1), Math.sqrt(k.idealSpeed ** 2 + 2 * 11.5 * k.lip));
   run(r, 6);
   const to = r.log.find((l) => l.e === 'takeoff');
   const land = r.log.find((l) => l.e === 'land');
@@ -61,7 +60,7 @@ for (const id of ['k-s1', 'k-m1', 'k-l1', 'k-xl1', 'k-big']) {
 {
   const k = world.kickers.find((q) => q.id === 'k-xl1');
   const r = makeRider();
-  r.spawn(new THREE.Vector3(k.x0, 0, -(k.d0 - 8)), new THREE.Vector3(0, 0, -1), 18);
+  r.spawn(new THREE.Vector3(k.x0, 0, -(k.d0 - 8)), new THREE.Vector3(0, 0, -1), Math.sqrt(k.idealSpeed ** 2 + 2 * 11.5 * k.lip));
   let tookOff = false;
   r.on('takeoff', () => (tookOff = true));
   run(r, 6, (rr) => {
@@ -80,7 +79,7 @@ for (const id of ['k-s1', 'k-m1', 'k-l1', 'k-xl1', 'k-big']) {
 {
   const k = world.kickers.find((q) => q.bigAir);
   const r = makeRider();
-  r.spawn(new THREE.Vector3(k.x0, 0, -(k.d0 - 8)), new THREE.Vector3(0, 0, -1), 21.5);
+  r.spawn(new THREE.Vector3(k.x0, 0, -(k.d0 - 8)), new THREE.Vector3(0, 0, -1), Math.sqrt(k.idealSpeed ** 2 + 2 * 11.5 * k.lip));
   run(r, 7, (rr) => {
     if (rr.mode !== 'air') return blankInput();
     const a = rr.air;
@@ -163,7 +162,7 @@ for (const id of ['r-down', 'b-long', 'r-gap', 'r-fdf']) {
 {
   const k = world.kickers.find((q) => q.id === 'k-xl1');
   const r = makeRider();
-  r.spawn(new THREE.Vector3(k.x0, 0, -(k.d0 - 8)), new THREE.Vector3(0, 0, -1), 18);
+  r.spawn(new THREE.Vector3(k.x0, 0, -(k.d0 - 8)), new THREE.Vector3(0, 0, -1), Math.sqrt(k.idealSpeed ** 2 + 2 * 11.5 * k.lip));
   run(r, 6, (rr) => blankInput({ steer: rr.mode === 'air' && rr.air && rr.air.t > 0.45 ? -1 : 0 }));
   const land = r.log.find((l) => l.e === 'land' || l.e === 'bail');
   const tr = land && land.d.trick;

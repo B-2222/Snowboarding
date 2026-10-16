@@ -94,6 +94,7 @@ export class Decor {
     this.buildGates();
     this.buildLamps();
     this.buildFlags();
+    this.buildMarkers();
     this.buildSpectators();
     this.buildCollectibles();
     for (const f of this.flags) f.userData.dynamic = true;
@@ -458,6 +459,44 @@ export class Decor {
         }
       }
     }
+  }
+
+  // Orange-and-black trail marker poles down both sides of the run.
+  buildMarkers() {
+    const w = this.world;
+    const parts = [];
+    for (let i = 0; i < 4; i++) {
+      parts.push({ geo: new THREE.CylinderGeometry(0.04, 0.04, 0.42, 6, 1, true), color: i % 2 ? 0x1a1f2b : 0xff6a1f, pos: new THREE.Vector3(0, 0.21 + i * 0.42, 0) });
+    }
+    parts.push({ geo: new THREE.CylinderGeometry(0.045, 0.045, 0.02, 6), color: 0xff6a1f, pos: new THREE.Vector3(0, 1.69, 0) });
+    const geo = mergeParts(parts);
+    const spots = [];
+    const clear = (x, d) => {
+      for (const f of w.features) {
+        if (f.type === 'cliff' || f.type === 'flat') continue;
+        if (x > f.xMin - 3 && x < f.xMax + 3 && d > f.dMin - 3 && d < f.dMax + 3) return false;
+      }
+      return true;
+    };
+    for (let d = 36; d < 1570; d += 22) {
+      const W = w.halfWidth(d);
+      for (const s of [-1, 1]) {
+        const x = s * (W - 5);
+        if (Math.abs(x - COURSE.liftX) < 6 || !clear(x, d)) continue;
+        spots.push([x, w.height(x, -d), -d]);
+      }
+    }
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6 });
+    const im = new THREE.InstancedMesh(geo, mat, spots.length);
+    const m = new THREE.Matrix4();
+    spots.forEach(([x, y, z], i) => {
+      m.makeRotationZ((Math.random() - 0.5) * 0.08);
+      m.setPosition(x, y - 0.05, z);
+      im.setMatrixAt(i, m);
+    });
+    im.castShadow = true;
+    im.frustumCulled = false;
+    this.group.add(im);
   }
 
   buildSpectators() {

@@ -27,6 +27,8 @@ function slopeFromTable(d) {
 
 // ---------------------------------------------------------------- features
 
+const KICKER_G = 11.5; // matches the rider's gravity
+
 class Kicker {
   constructor(def, world) {
     const sz = KICKER_SIZES[def.size];
@@ -38,37 +40,90 @@ class Kicker {
     this.d0 = def.d;
     this.lip = sz.lip;
     this.width = sz.width;
-    this.idealSpeed = sz.speed;
-    const s = world.slopeAt(def.d + 6);
-    const S1 = Math.tan((sz.angle * Math.PI) / 180) + s;
-    const a = (2 * sz.lip) / S1;
-    const tableSlope = 0.85 * s;
-    const m = Math.tan((sz.land * Math.PI) / 180) - s;
-    const segs = [
-      [a, S1],
-      [0.12, -1.6],
-      [0.22, -1.6],
-      [0.3, tableSlope],
-      [Math.max(0.5, sz.table - 0.64), tableSlope],
-      [3.2, -m],
-    ];
-    const pre = new Profile1D(segs);
-    const closeLen = 5;
-    const Ll = Math.max(1, (pre.endHeight - (m * closeLen) / 2) / m);
-    segs.push([Ll, -m], [closeLen, 0]);
-    this.profile = new Profile1D(segs);
-    this.lipU = a;
-    this.knuckleU = a + sz.table;
-    this.landU0 = this.knuckleU + 3.2;
-    this.landU1 = this.landU0 + Ll;
-    this.length = this.profile.length;
-    this.side = Math.max(2, sz.lip * 1.3);
+    this.idealSpeed = def.speed || sz.speed;
     this.angle = sz.angle;
+    const DEG = Math.PI / 180;
+    const s = world.slopeAt(def.d + 15);
+    const S1 = Math.tan(sz.angle * DEG) + s;
+    const a = (2 * sz.lip) / S1;
+    const tableSlope = s - Math.tan(sz.tableDown * DEG);
+    const m = Math.max(0.2, Math.tan(sz.land * DEG) - s);
+    const baseAt = (u) => world.lookupY(def.d + u) - world.lookupY(def.d);
+    const build = (L) => {
+      const segs = [
+        [a, S1],
+        [0.12, -1.6],
+        [0.22, -1.6],
+        [0.3, tableSlope],
+        [Math.max(0.5, L - 0.64), tableSlope],
+        [3.2, -m],
+      ];
+      const pre = new Profile1D(segs);
+      const closeLen = 6;
+      const Ll = Math.max(4, (pre.endHeight - (m * closeLen) / 2) / m);
+      segs.push([Ll, -m], [closeLen, 0]);
+      const profile = new Profile1D(segs);
+      return { profile, knuckleU: a + L, landU0: a + L + 3.2, landU1: a + L + 3.2 + Ll };
+    };
+    // Fly the design speed off the lip and solve for the table length that
+    // puts the landing about a third of the way down the landing slope.
+    const fly = (p) => {
+      const g = (u) => baseAt(u) + p.profile.height(u);
+      const lipSlope = (g(a) - g(a - 0.05)) / 0.05;
+      const ang = Math.atan(lipSlope);
+      let u = a;
+      let y = g(a);
+      let vu = this.idealSpeed * Math.cos(ang);
+      let vy = this.idealSpeed * Math.sin(ang);
+      const dt = 0.01;
+      const path = [];
+      for (let i = 0; i < 1200; i++) {
+        vy -= KICKER_G * dt;
+        const sp = Math.hypot(vu, vy);
+        vu *= 1 - 0.0016 * sp * dt;
+        vy *= 1 - 0.0016 * sp * dt;
+        u += vu * dt;
+        y += vy * dt;
+        if (i % 5 === 0) path.push([u, y]);
+        if (u > a + 0.5 && y <= g(u)) break;
+      }
+      return { uLand: u, path };
+    };
+    let best = null;
+    for (let L = 2; L <= 52; L += 0.25) {
+      const p = build(L);
+      const f = fly(p);
+      // unpopped airs land early on the landing, so a pop still lands it
+      const target = p.landU0 + 0.22 * (p.landU1 - p.landU0);
+      const err = Math.abs(f.uLand - target);
+      if (!best || err < best.err) best = { err, L, p, f };
+    }
+    const P = best.p;
+    this.profile = P.profile;
+    this.lipU = a;
+    this.knuckleU = P.knuckleU;
+    this.landU0 = P.landU0;
+    this.landU1 = P.landU1;
+    this.table = best.L;
+    this.length = this.profile.length;
+    this.path = best.f.path; // [u, y relative to the base at d0]
+    // sloped shoulders: about 40 degrees however tall the jump is
+    let hMax = 0;
+    for (let u = 0; u < this.length; u += 1) hMax = Math.max(hMax, this.profile.height(u));
+    this.hMax = hMax;
+    this.side = Math.max(2.4, hMax * 1.2);
     this.dMin = this.d0;
     this.dMax = this.d0 + this.length;
     const maxHalf = this.halfWidth(this.length);
     this.xMin = this.x0 - maxHalf - this.side;
     this.xMax = this.x0 + maxHalf + this.side;
+    this.baseY0 = world.lookupY(def.d);
+  }
+  // A point on the design arc, t = 0..1 from lip to landing.
+  arcPoint(t, out) {
+    const i = Math.min(this.path.length - 1, Math.max(0, Math.round(t * (this.path.length - 1))));
+    const [u, y] = this.path[i];
+    return out.set(this.x0, this.baseY0 + y, -(this.d0 + u));
   }
   halfWidth(u) {
     const w0 = this.width / 2;
@@ -369,26 +424,8 @@ export class World {
       this.addToBuckets(ramp);
     }
 
-    // Speed checks: the snow before each jump and rail is shaped so riders
-    // arrive near the right speed unless they tuck for more.
-    this.speedZones = [];
-    for (const k of this.kickers) {
-      this.speedZones.push({ dMin: k.d0 - 34, dMax: k.d0 + k.lipU, xMin: k.x0 - k.width / 2 - 2, xMax: k.x0 + k.width / 2 + 2, ideal: k.idealSpeed, kind: 'kicker' });
-    }
-    for (const r of this.rails) {
-      this.speedZones.push({ dMin: r.d0 - 22, dMax: r.d0 + r.total, xMin: r.x0 - 3, xMax: r.x0 + 3, ideal: r.kind === 'box' ? 8.5 : 9, kind: 'rail' });
-    }
-
     this.buildObstacles();
     this.buildCollectibles();
-  }
-
-  speedZoneAt(x, z) {
-    const d = -z;
-    for (const zn of this.speedZones) {
-      if (d >= zn.dMin && d <= zn.dMax && x >= zn.xMin && x <= zn.xMax) return zn;
-    }
-    return null;
   }
 
   addToBuckets(f) {
@@ -624,15 +661,27 @@ export class World {
     return null;
   }
 
+  // Where a collectible sits: on a kicker's arc, in the air above a pipe
+  // wall, or a fixed height over the snow.
+  placeItem(def) {
+    const v = new THREE.Vector3();
+    if (def.kicker) {
+      const k = this.kickers.find((q) => q.id === def.kicker);
+      k.arcPoint(def.t ?? 0.5, v);
+      v.y += def.up || 0;
+      return v;
+    }
+    if (def.pipe) {
+      const p = this.pipe;
+      const x = p.x0 + def.pipe * (p.copingV - 0.7);
+      return v.set(x, this.baseHeight(p.x0, -def.d) + p.wallH + (def.above || 1.5), -def.d);
+    }
+    return v.set(def.x, this.height(def.x, -def.d) + def.up, -def.d);
+  }
+
   buildCollectibles() {
-    this.letters = LETTERS.map((l, i) => {
-      const y = this.height(l.x, -l.d) + l.up;
-      return { kind: 'letter', id: 'L' + l.ch, ch: l.ch, index: i, pos: new THREE.Vector3(l.x, y, -l.d) };
-    });
-    this.flakes = FLAKES.map((f, i) => {
-      const y = this.height(f.x, -f.d) + f.up;
-      return { kind: 'flake', id: 'F' + i, index: i, pos: new THREE.Vector3(f.x, y, -f.d) };
-    });
+    this.letters = LETTERS.map((l, i) => ({ kind: 'letter', id: 'L' + l.ch, ch: l.ch, index: i, pos: this.placeItem(l) }));
+    this.flakes = FLAKES.map((f, i) => ({ kind: 'flake', id: 'F' + i, index: i, pos: this.placeItem(f) }));
   }
 
   spawnPoint(id = 'top') {

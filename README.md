@@ -9,7 +9,8 @@ controls, and with a gamepad.
 
 ## What's in it
 
-- **Shredline Mountain:** 1.7 km of park in one run. Warm-up rollers, a jib
+- **Shredline Mountain:** 1.7 km of steep park in one run (24 to 31 degree
+  pitches, 90+ km/h on the open slopes, over 110 km/h tucked). Warm-up rollers, a jib
   garden (down rail, flat-down-flat, rainbow rail, kinked rail, long box,
   butter box, gap rail), a jump line with S/M/L/XL kickers, a 180 m superpipe,
   backcountry cliffs and tree islands, a 21 m Big Air jump and a finish area
@@ -71,6 +72,10 @@ How it rides:
   need real air time. Pressing A or D late gives a shifty instead.
 - **Landing:** let go a moment before you touch down so the board lines up,
   nose or tail first.
+- **Speed:** there are no hidden speed limits. Every kicker is built for the
+  speed you naturally carry into it, with landings long enough for a pop or a
+  tuck. Too slow and you land on the table; too fast and you overshoot, so
+  hockey-stop (S) or carve to check your speed like a real rider.
 
 ## Development
 

@@ -104,7 +104,7 @@ export class Sky {
     this.rangeMats = [];
     const noise = makeNoise2D(77);
     const rand = mulberry32(12);
-    const center = new THREE.Vector3(0, -250, -800);
+    const center = new THREE.Vector3(0, this.world.height(0, -800), -800);
     const ring = (radius, peakH, baseY, segments, colorTop, colorLow, seedOff) => {
       const pos = [];
       const col = [];
@@ -146,8 +146,8 @@ export class Sky {
     };
     this.ranges = new THREE.Group();
     this.rangeMats = this.rangeMats || [];
-    this.ranges.add(ring(1500, 900, -380, 90, 0xf4f8ff, 0x7c8cab, 0));
-    this.ranges.add(ring(2300, 1300, -500, 70, 0xe8f0ff, 0x6a7c9e, 9));
+    this.ranges.add(ring(1500, 1150, center.y - 420, 90, 0xf4f8ff, 0x7c8cab, 0));
+    this.ranges.add(ring(2300, 1600, center.y - 560, 70, 0xe8f0ff, 0x6a7c9e, 9));
     this.scene.add(this.ranges);
   }
 

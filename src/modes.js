@@ -183,7 +183,7 @@ export class BigAir extends Mode {
     this.state = 'inrun';
     this.wait = 0;
     const k = g.world.kickers.find((q) => q.bigAir);
-    const z = -(k.d0 - 95);
+    const z = -(k.d0 - 80);
     g.spawnPoint(new THREE.Vector3(k.x0, 0, z), new THREE.Vector3(0, 0, -1), 6);
     g.runRecorder.start();
     g.ui.callout(`Jump ${this.attempt} of 3`, 'neutral');

@@ -2,28 +2,30 @@
 
 // [distance downhill, slope (tan of angle)]
 export const SLOPE_TABLE = [
-  [-200, 0.34],
-  [-10, 0.30],
-  [0, 0.1],
-  [6, 0.12],
-  [30, 0.26],
-  [200, 0.27],
-  [430, 0.29],
-  [760, 0.29],
-  [790, 0.27],
-  [985, 0.27],
-  [1010, 0.30],
-  [1270, 0.31],
-  [1300, 0.47],
-  [1395, 0.47],
-  [1412, 0.29],
-  [1440, 0.29],
-  [1480, 0.34],
-  [1525, 0.24],
-  [1560, 0.03],
+  [-200, 0.6],
+  [-10, 0.5],
+  [0, 0.12],
+  [6, 0.14],
+  [30, 0.45], // drop in: about 24 degrees
+  [212, 0.47],
+  [236, 0.4], // jib garden eases a touch
+  [410, 0.4],
+  [432, 0.36], // jump line: about 20 degrees
+  [770, 0.36],
+  [796, 0.33], // superpipe
+  [982, 0.33],
+  [1006, 0.54], // backcountry: about 28 degrees
+  [1270, 0.56],
+  [1300, 0.6], // big air in-run: about 31 degrees
+  [1388, 0.6],
+  [1408, 0.42],
+  [1440, 0.42],
+  [1480, 0.5],
+  [1530, 0.3],
+  [1566, 0.04],
   [1680, 0.0],
-  [1720, -0.12],
-  [2100, -0.12],
+  [1720, -0.14],
+  [2100, -0.14],
 ];
 
 export const COURSE = {
@@ -41,34 +43,36 @@ export const SECTIONS = [
   { id: 'top', name: 'Summit Start', d: 6, x: 0 },
   { id: 'warmup', name: 'Warm-up Run', d: 50, x: 0 },
   { id: 'jib', name: 'Jib Garden', d: 212, x: 0 },
-  { id: 'jumps', name: 'Jump Line', d: 420, x: 0 },
+  { id: 'jumps', name: 'Jump Line', d: 405, x: 0 },
   { id: 'pipe', name: 'Superpipe', d: 772, x: 0 },
   { id: 'backcountry', name: 'Backcountry', d: 990, x: 0 },
   { id: 'bigair', name: 'Big Air', d: 1296, x: 0 },
 ];
 
-// Kicker sizes. lip = lip height (m), angle = takeoff angle (deg), table length,
-// land = landing angle (deg), width at the takeoff.
+// Kicker shapes. lip = lip height (m), angle = takeoff angle (deg),
+// land = landing angle (deg), tableDown = how steeply the table falls away
+// (deg), speed = the lip speed the jump is built for (m/s). The table length
+// is solved so a rider arriving at that speed lands in the sweet spot.
 export const KICKER_SIZES = {
-  S: { lip: 0.85, angle: 22, table: 4.5, land: 28, width: 6, speed: 13 },
-  M: { lip: 1.3, angle: 26, table: 7.5, land: 31, width: 7.5, speed: 14.5 },
-  L: { lip: 1.8, angle: 28, table: 11, land: 33, width: 9, speed: 14.5 },
-  XL: { lip: 2.4, angle: 30, table: 15, land: 34, width: 11, speed: 16.5 },
-  BIG: { lip: 3.8, angle: 35, table: 21, land: 36, width: 14, speed: 19 },
+  S: { lip: 0.9, angle: 20, land: 32, width: 6.5, tableDown: 9, speed: 19.5 },
+  M: { lip: 1.4, angle: 24, land: 34, width: 8, tableDown: 10, speed: 20 },
+  L: { lip: 2.0, angle: 26, land: 35, width: 9.5, tableDown: 10, speed: 20.5 },
+  XL: { lip: 2.6, angle: 28, land: 36, width: 11, tableDown: 10, speed: 21 },
+  BIG: { lip: 4.0, angle: 30, land: 37, width: 15, tableDown: 11, speed: 22 },
 };
 
 export const KICKERS = [
-  { id: 'k-s1', size: 'S', x: -18, d: 112 },
-  { id: 'k-s2', size: 'S', x: 18, d: 150 },
-  { id: 'k-m1', size: 'M', x: 0, d: 452 },
-  { id: 'k-s3', size: 'S', x: -30, d: 490 },
-  { id: 'k-l1', size: 'L', x: 0, d: 535 },
-  { id: 'k-m2', size: 'M', x: 30, d: 580 },
-  { id: 'k-xl1', size: 'XL', x: 0, d: 632 },
-  { id: 'k-s4', size: 'S', x: -32, d: 690 },
-  { id: 'k-m3', size: 'M', x: -14, d: 1052 },
-  { id: 'k-l2', size: 'L', x: 10, d: 1170 },
-  { id: 'k-big', size: 'BIG', x: 0, d: 1418, bigAir: true },
+  { id: 'k-s1', size: 'S', x: -18, d: 112, speed: 18.6 },
+  { id: 'k-s2', size: 'S', x: 18, d: 140, speed: 18.3 },
+  { id: 'k-m1', size: 'M', x: 0, d: 440, speed: 18.1 },
+  { id: 'k-s3', size: 'S', x: -30, d: 470, speed: 20.1 },
+  { id: 'k-l1', size: 'L', x: 0, d: 548, speed: 18.8 },
+  { id: 'k-m2', size: 'M', x: 30, d: 590, speed: 19.8 },
+  { id: 'k-xl1', size: 'XL', x: 0, d: 662, speed: 18.6 },
+  { id: 'k-s4', size: 'S', x: -32, d: 690, speed: 19.9 },
+  { id: 'k-m3', size: 'M', x: -16, d: 1040, speed: 22.7 },
+  { id: 'k-l2', size: 'L', x: 10, d: 1160, speed: 23.5 },
+  { id: 'k-big', size: 'BIG', x: 0, d: 1412, bigAir: true, speed: 21.9 },
 ];
 
 export const PIPE = { x: 0, d: 790, length: 180, flat: 10, radius: 5.6, maxAngle: 84, deck: 4 };
@@ -92,26 +96,27 @@ export const RAILS = [
   { id: 'r-kink', kind: 'rail', name: 'Kinked Rail', x: -20, d: 318, h: 0.6, segs: [[5, 'follow'], [2.5, 0.0], [5, 'follow+0.06']] },
   { id: 'b-butter', kind: 'box', name: 'Butter Box', x: 6, d: 342, h: 0.38, segs: [[10, 'follow']] },
   { id: 'r-gap', kind: 'rail', name: 'Gap Rail', x: 0, d: 382, h: 0.75, segs: [[19, 'follow']] },
-  { id: 'r-bc1', kind: 'rail', name: 'Creek Rail', x: 12, d: 1082, h: 0.65, segs: [[15, 'follow']] },
-  { id: 'b-bc2', kind: 'box', name: 'Log Box', x: -14, d: 1132, h: 0.5, segs: [[12, 'follow']] },
-  { id: 'r-fin', kind: 'rail', name: 'Finish Rail', x: -20, d: 1500, h: 0.6, segs: [[12, 'follow']] },
+  { id: 'r-bc1', kind: 'rail', name: 'Creek Rail', x: 16, d: 1082, h: 0.65, segs: [[15, 'follow']] },
+  { id: 'b-bc2', kind: 'box', name: 'Log Box', x: -38, d: 1182, h: 0.5, segs: [[12, 'follow']] },
+  { id: 'r-fin', kind: 'rail', name: 'Finish Rail', x: -30, d: 1515, h: 0.6, segs: [[12, 'follow']] },
 ];
 
-// Collectibles. Letters spell SHRED; flakes are hidden all over.
+// Collectibles. Letters spell SHRED; flakes are hidden all over. Items on a
+// kicker sit on its jump arc (t = 0.5 is the top of a normal air).
 export const LETTERS = [
-  { ch: 'S', x: -18, d: 121, up: 4.2 },
+  { ch: 'S', kicker: 'k-s1', t: 0.5, up: 0.4 },
   { ch: 'H', x: 0, d: 403, up: 2.2 },
-  { ch: 'R', x: -9.6, d: 870, up: 7.5, pipeWall: true },
-  { ch: 'E', x: 0, d: 662, up: 7.5 },
-  { ch: 'D', x: 0, d: 1440, up: 9.5 },
+  { ch: 'R', pipe: -1, d: 870, above: 2.2 },
+  { ch: 'E', kicker: 'k-xl1', t: 0.55, up: 0.5 },
+  { ch: 'D', kicker: 'k-big', t: 0.5, up: 0.9 },
 ];
 
 export const FLAKES = [
   { x: 24, d: 95, up: 1.2 }, { x: -40, d: 170, up: 1.2 }, { x: 28, d: 310, up: 2.6 },
-  { x: -26, d: 258, up: 1.7 }, { x: 48, d: 410, up: 1.2 }, { x: -30, d: 500, up: 3.5 },
-  { x: 0, d: 548, up: 6.0 }, { x: 30, d: 590, up: 4.2 }, { x: -50, d: 610, up: 1.2 },
-  { x: 9.2, d: 820, up: 6.5 }, { x: -9.2, d: 935, up: 6.5 }, { x: 40, d: 1036, up: 4.5 },
+  { x: -26, d: 258, up: 1.7 }, { x: 48, d: 410, up: 1.2 }, { kicker: 'k-s3', t: 0.45, up: 0.3 },
+  { kicker: 'k-l1', t: 0.5, up: 0.4 }, { kicker: 'k-m2', t: 0.5, up: 0.3 }, { x: -50, d: 610, up: 1.2 },
+  { pipe: 1, d: 820, above: 1.6 }, { pipe: -1, d: 935, above: 1.6 }, { x: 40, d: 1036, up: 4.5 },
   { x: -47, d: 1104, up: 6.0 }, { x: 12, d: 1090, up: 1.9 }, { x: -48, d: 1200, up: 1.2 },
-  { x: 52, d: 1240, up: 1.2 }, { x: -14, d: 1062, up: 4.0 }, { x: 10, d: 1182, up: 5.0 },
-  { x: 0, d: 1454, up: 6.0 }, { x: -36, d: 1530, up: 1.2 },
+  { x: 52, d: 1240, up: 1.2 }, { kicker: 'k-m3', t: 0.5, up: 0.3 }, { kicker: 'k-l2', t: 0.55, up: 0.4 },
+  { kicker: 'k-big', t: 0.7, up: 0.4 }, { x: -36, d: 1530, up: 1.2 },
 ];

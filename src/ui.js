@@ -136,10 +136,15 @@ export class UI {
     }
   }
 
-  setSpeed(ms, units) {
+  setSpeed(ms, units, mode) {
     const v = units === 'mph' ? ms * 2.23694 : ms * 3.6;
     $('hudSpeed').textContent = Math.round(v);
     $('hudUnit').textContent = units === 'mph' ? 'MPH' : 'KM/H';
+    // speed lines creep in above about 70 km/h
+    const k = clamp((ms - 19) / 14, 0, 1) * (mode === 'bail' ? 0 : 1);
+    this._lines = (this._lines || 0) + (k - (this._lines || 0)) * 0.08;
+    const el = $('speedlines');
+    if (el) el.style.opacity = (this._lines * 0.75).toFixed(3);
   }
 
   setOnline(n, status) {
@@ -150,6 +155,13 @@ export class UI {
     }
     el.hidden = false;
     el.textContent = n > 0 ? `${n + 1} riders on the mountain` : 'Online · just you';
+  }
+
+  clearSpeedLines() {
+    if (!this._lines) return;
+    this._lines = 0;
+    const el = $('speedlines');
+    if (el) el.style.opacity = '0';
   }
 
   setReplay(on, progress = 0, slowmo = false) {
