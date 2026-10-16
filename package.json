@@ -1,0 +1,25 @@
+{
+  "name": "shredline",
+  "version": "1.0.0",
+  "description": "Shredline: a 3D snowboarding park game for the browser",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node tests/physics.test.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/B-2222/Snowboarding.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/B-2222/Snowboarding/issues"
+  },
+  "homepage": "https://github.com/B-2222/Snowboarding#readme",
+  "devDependencies": {
+    "esbuild": "^0.24.0",
+    "three": "^0.149.0"
+  },
+  "type": "module"
+}
